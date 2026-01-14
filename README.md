@@ -1,4 +1,4 @@
-# Node.js Authentication Backend
+# NodeJS Authentication Backend
 
 A backend authentication service built with Node.js, Express, and MongoDB.  
 Implements JWT authentication with refresh token rotation.
