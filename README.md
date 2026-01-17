@@ -1,6 +1,5 @@
 # NodeJS Auth API
 
-<<<<<<< HEAD
 A production-ready Authentication API built with Node.js, Express, and MongoDB. It features secure JWT-based authentication (using both HttpOnly cookies and response body for compatibility), refresh token rotation, and standardized error handling.
 
 ## Features
@@ -18,7 +17,7 @@ A production-ready Authentication API built with Node.js, Express, and MongoDB. 
 -   **Database**: MongoDB (Mongoose ODM)
 -   **Auth**: JWT (JSON Web Tokens)
 -   **Validation**: Joi
-=======
+
 A REST API implementation demonstrating JWT-based authentication with access and refresh tokens.
 
 ## Overview
@@ -42,13 +41,11 @@ I built this project to understand how real authentication systems work behind t
 - **ODM:** Mongoose
 - **Authentication:** JWT (jsonwebtoken)
 - **Password Hashing:** bcrypt
->>>>>>> 40fe5c2045184fb849c9f9c562ef7636ac3553d8
 
 ## Getting Started
 
 ### Prerequisites
 
-<<<<<<< HEAD
 -   Node.js (v14+ recommended)
 -   MongoDB (Local or Atlas URI)
 
@@ -312,5 +309,3 @@ Authorization: Bearer <access_token>
 - [ ] Email verification for new accounts
 - [ ] Role-based access control (RBAC)
 - [ ] OAuth integration (Google, GitHub)
-
->>>>>>> 40fe5c2045184fb849c9f9c562ef7636ac3553d8
