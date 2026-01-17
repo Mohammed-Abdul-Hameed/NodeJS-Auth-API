@@ -16,6 +16,7 @@ app.use(cookieParser());
 // Routes
 app.use('/health', healthRouter);
 app.use('/api/auth', require('./routes/auth'));
+app.use('/api/user', require('./routes/user'));
 
 // 404 for unknown routes (JSON)
 app.use((req, res) => {

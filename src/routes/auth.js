@@ -2,29 +2,24 @@ const express = require('express');
 const router = express.Router();
 const authController = require('../controllers/authController');
 
-// @route   POST api/auth/register
+// @route   POST api/auth/signup
 // @desc    Register user
 // @access  Public
-router.post('/register', authController.register);
+router.post('/signup', authController.register);
 
 // @route   POST api/auth/login
 // @desc    Authenticate user & get token
 // @access  Public
 router.post('/login', authController.login);
 
-// @route   POST api/auth/refresh-token
+// @route   POST api/auth/refresh
 // @desc    Get new access token
 // @access  Public
-router.post('/refresh-token', authController.refreshToken);
+router.post('/refresh', authController.refreshToken);
 
-// @route   POST api/auth/revoke-token
+// @route   POST api/auth/logout
 // @desc    Logout
 // @access  Public
-router.post('/revoke-token', authController.revokeToken);
-
-// @route   GET api/auth/me
-// @desc    Get current user profile
-// @access  Private
-router.get('/me', require('../middleware/auth'), authController.getMe);
+router.post('/logout', authController.revokeToken);
 
 module.exports = router;

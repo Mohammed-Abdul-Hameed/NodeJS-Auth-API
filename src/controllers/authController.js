@@ -21,7 +21,15 @@ const register = async (req, res) => {
 		const refreshToken = await tokenService.generateRefreshToken(user);
 		setTokenCookie(res, refreshToken.token);
 
-		res.status(201).json({ accessToken });
+		res.status(201).json({
+			accessToken,
+			refreshToken: refreshToken.token,
+			user: {
+				id: user.id,
+				email: user.email,
+				username: user.username, // Assuming username exists if added to model, otherwise just email
+			},
+		});
 	} catch (err) {
 		console.error(err.message);
 		if (err.message === 'User already exists') {
@@ -50,7 +58,14 @@ const login = async (req, res) => {
 		const refreshToken = await tokenService.generateRefreshToken(user);
 		setTokenCookie(res, refreshToken.token);
 
-		res.json({ accessToken });
+		res.json({
+			accessToken,
+			refreshToken: refreshToken.token,
+			user: {
+				id: user.id,
+				email: user.email,
+			},
+		});
 	} catch (err) {
 		console.error(err.message);
 		if (err.message === 'Invalid Credentials') {
@@ -61,25 +76,25 @@ const login = async (req, res) => {
 };
 
 const refreshToken = async (req, res) => {
-	const token = req.cookies.refreshToken;
+	const token = req.cookies.refreshToken || req.body.refreshToken;
 	if (!token) {
 		return res.status(400).json({ msg: 'Token is required' });
 	}
 
 	try {
-		const refreshToken = await tokenService.getRefreshToken(token);
-		const { user } = refreshToken;
+		const refreshTokenDoc = await tokenService.getRefreshToken(token);
+		const { user } = refreshTokenDoc;
 
 		// Rotate token
 		const newRefreshToken = await tokenService.generateRefreshToken(user);
-		refreshToken.revoked = Date.now();
-		refreshToken.replacedByToken = newRefreshToken.token;
-		await refreshToken.save();
+		refreshTokenDoc.revoked = Date.now();
+		refreshTokenDoc.replacedByToken = newRefreshToken.token;
+		await refreshTokenDoc.save();
 
 		const accessToken = tokenService.generateAccessToken({ user: { id: user.id } });
 		setTokenCookie(res, newRefreshToken.token);
 
-		res.json({ accessToken });
+		res.json({ accessToken, refreshToken: newRefreshToken.token });
 	} catch (err) {
 		console.error(err.message);
 		res.status(400).json({ msg: 'Invalid Refresh Token' });
@@ -87,7 +102,7 @@ const refreshToken = async (req, res) => {
 };
 
 const revokeToken = async (req, res) => {
-	const token = req.cookies.refreshToken;
+	const token = req.cookies.refreshToken || req.body.refreshToken;
 	if (!token) {
 		return res.status(400).json({ msg: 'Token is required' });
 	}
