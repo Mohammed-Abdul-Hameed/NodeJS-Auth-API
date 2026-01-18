@@ -1,4 +1,4 @@
-# NodeJS Auth API
+# NodeJS Authentication API
 
 A production-style authentication API built with **Node.js**, **Express**, and **MongoDB**.
 Implements **JWT access tokens**, **refresh token rotation**, **HttpOnly cookie support**, and **clean layered architecture**.
@@ -102,6 +102,8 @@ Log In
 POST /api/auth/login
 
 {
+  "email": "user@example.com",
+  "password": "StrongPassword123"
   "email": "user@example.com",
   "password": "StrongPassword123"
 }
