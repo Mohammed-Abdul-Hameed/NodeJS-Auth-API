@@ -1,64 +1,103 @@
-const mongoose = require('mongoose');
+const { Sequelize } = require('sequelize');
 
-// Maximum number of reconnection attempts before giving up
 const DEFAULT_RETRIES = 5;
-
-// Base delay between retries (will increase with each failed attempt)
 const RETRY_DELAY_MS = 2000;
 
+let sequelize;
+
 /**
- * Establishes a MongoDB connection with retry logic.
- * If MongoDB is temporarily unavailable, the function retries
- * instead of crashing the app immediately.
+ * Validates required environment variables at startup.
+ * Fails fast if critical configuration is missing.
+ */
+function validateEnvironment() {
+	const required = ['DB_HOST', 'DB_NAME', 'DB_USER', 'DB_PASSWORD', 'JWT_SECRET'];
+	const missing = required.filter((key) => !process.env[key]);
+
+	if (missing.length > 0) {
+		throw new Error(`Missing required environment variables: ${missing.join(', ')}`);
+	}
+
+	// Warn about weak secrets in production
+	if (process.env.NODE_ENV === 'production') {
+		if (process.env.JWT_SECRET.length < 32) {
+			throw new Error('JWT_SECRET must be at least 32 characters in production');
+		}
+		if (process.env.REFRESH_TOKEN_SECRET && process.env.REFRESH_TOKEN_SECRET.length < 32) {
+			throw new Error('REFRESH_TOKEN_SECRET must be at least 32 characters in production');
+		}
+	}
+}
+
+/**
+ * Establishes a PostgreSQL connection with Sequelize.
  */
 async function connect(retries = DEFAULT_RETRIES) {
-	// Read MongoDB connection string from environment variables
-	const uri = process.env.MONGO_URI;
+	validateEnvironment();
 
-	// Connection options to avoid hanging forever on bad networks
-	const opts = {
-		serverSelectionTimeoutMS: 5000, // Fail fast if server not reachable
-		socketTimeoutMS: 45000, // Close inactive sockets after 45s
-	};
+	const {
+		DB_HOST,
+		DB_PORT,
+		DB_NAME,
+		DB_USER,
+		DB_PASSWORD,
+	} = process.env;
+
+	sequelize = new Sequelize(DB_NAME, DB_USER, DB_PASSWORD, {
+		host: DB_HOST,
+		port: DB_PORT || 5432,
+		dialect: 'postgres',
+		logging: process.env.NODE_ENV === 'development' ? console.log : false,
+		pool: {
+			max: 5,
+			min: 0,
+			acquire: 30000,
+			idle: 10000,
+		},
+	});
 
 	try {
-		// Attempt connection
-		await mongoose.connect(uri, opts);
-		console.info('MongoDB connected');
-		return mongoose.connection;
+		await sequelize.authenticate();
+		console.info('PostgreSQL connected');
+
+		// Sync models (use { force: true } only in dev to drop tables)
+		const syncOptions = process.env.NODE_ENV === 'development'
+			? { alter: true }
+			: {};
+
+		await sequelize.sync(syncOptions);
+		console.info('Database synchronized');
+
+		return sequelize;
 	} catch (err) {
-		// Log the actual error message for debugging
-		console.error(`MongoDB connection error: ${err.message}`);
+		console.error(`PostgreSQL connection error: ${err.message}`);
 
-		// If retries are still available, wait and try again
 		if (retries > 0) {
-			// Increase delay with each retry (simple linear backoff)
 			const delay = RETRY_DELAY_MS * (DEFAULT_RETRIES - retries + 1);
-
-			console.info(
-				`Retrying MongoDB connection in ${delay}ms... (${retries - 1} retries left)`,
-			);
-
-			// Pause execution before retrying
+			console.info(`Retrying PostgreSQL connection in ${delay}ms... (${retries - 1} retries left)`);
 			await new Promise((res) => setTimeout(res, delay));
-
-			// Recursive retry call with reduced retry count
 			return connect(retries - 1);
 		}
 
-		// No retries left — fail hard so server startup can be aborted
-		console.error('MongoDB connection failed after retries. Exiting.');
+		console.error('PostgreSQL connection failed after retries. Exiting.');
 		throw err;
 	}
 }
 
 /**
- * Gracefully closes the MongoDB connection.
- * Useful during server shutdowns or testing teardown.
+ * Gracefully closes the database connection.
  */
 async function disconnect() {
-	await mongoose.disconnect();
-	console.info('MongoDB disconnected');
+	if (sequelize) {
+		await sequelize.close();
+		console.info('PostgreSQL disconnected');
+	}
 }
 
-module.exports = { connect, disconnect, mongoose };
+/**
+ * Get Sequelize instance for model definitions.
+ */
+function getSequelize() {
+	return sequelize;
+}
+
+module.exports = { connect, disconnect, getSequelize };

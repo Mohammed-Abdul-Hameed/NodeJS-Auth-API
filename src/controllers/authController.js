@@ -1,106 +1,160 @@
 const authService = require('../services/authService');
 const tokenService = require('../services/tokenService');
-const Joi = require('joi');
+const { getSequelize } = require('../db');
+const VerificationTokenModel = require('../model/VerificationToken');
+const UserModel = require('../model/User');
+
+// Lazy load models to ensure sequelize is initialized
+const getVerificationTokenModel = () => {
+	const sequelize = getSequelize();
+	return VerificationTokenModel(sequelize);
+};
+
+const getUserModel = () => {
+	const sequelize = getSequelize();
+	return UserModel(sequelize);
+};
 
 /**
  * Register a new user.
- * Validates input → creates user → issues tokens → sets refresh cookie.
+ * Validates input -> creates user -> issues tokens -> sets refresh cookie.
  */
 const register = async (req, res) => {
-	// Define input validation schema
-	const schema = Joi.object({
-		email: Joi.string().email().required(),
-		password: Joi.string().min(6).required(),
-	});
-
-	// Validate request body before doing anything else
-	const { error } = schema.validate(req.body);
-	if (error) {
-		return res.status(400).json({ msg: error.details[0].message });
-	}
-
 	const { email, password } = req.body;
 
 	try {
-		// Create user in database
 		const user = await authService.registerUser(email, password);
 
-		// Generate short-lived access token
-		const accessToken = tokenService.generateAccessToken({ user: { id: user.id } });
+		// Create verification token
+		const VerificationToken = getVerificationTokenModel();
+		await VerificationToken.createToken(user.id);
 
-		// Generate long-lived refresh token stored in DB
+		const accessToken = tokenService.generateAccessToken(user);
 		const refreshToken = await tokenService.generateRefreshToken(user);
-
-		// Store refresh token in HttpOnly cookie (prevents JS access)
 		setTokenCookie(res, refreshToken.token);
 
-		// Send tokens + basic user info in response
 		res.status(201).json({
 			accessToken,
-			refreshToken: refreshToken.token,
 			user: {
 				id: user.id,
 				email: user.email,
-				username: user.username,
+				roles: user.roles,
+				isVerified: user.isVerified,
 			},
+			message: 'Registration successful. Please verify your email.',
 		});
 	} catch (err) {
 		console.error(err.message);
-
-		// Handle known business-case error
 		if (err.message === 'User already exists') {
-			return res.status(400).json({ msg: err.message });
+			return res.status(400).json({ error: err.message });
+		}
+		res.status(500).json({ error: 'Server Error' });
+	}
+};
+
+/**
+ * Verify user email with token.
+ */
+const verifyEmail = async (req, res) => {
+	const { token } = req.body;
+
+	if (!token) {
+		return res.status(400).json({ error: 'Verification token is required' });
+	}
+
+	try {
+		const VerificationToken = getVerificationTokenModel();
+		const verificationToken = await VerificationToken.findValidToken(token);
+
+		// Update user as verified
+		const User = getUserModel();
+		const user = await User.findByPk(verificationToken.userId);
+		if (!user) {
+			return res.status(404).json({ error: 'User not found' });
 		}
 
-		// Anything else is a server fault
-		res.status(500).send('Server Error');
+		user.isVerified = true;
+		await user.save();
+
+		// Delete the used verification token
+		await verificationToken.destroy();
+
+		res.json({ message: 'Email verified successfully' });
+	} catch (err) {
+		console.error(err.message);
+		res.status(400).json({ error: err.message });
+	}
+};
+
+/**
+ * Resend verification email.
+ */
+const resendVerification = async (req, res) => {
+	const { email } = req.body;
+
+	if (!email) {
+		return res.status(400).json({ error: 'Email is required' });
+	}
+
+	try {
+		const User = getUserModel();
+		const user = await User.findOne({ where: { email } });
+
+		if (!user) {
+			// Don't reveal if user exists
+			return res.json({ message: 'If the email exists, a verification link has been sent' });
+		}
+
+		if (user.isVerified) {
+			return res.status(400).json({ error: 'Email is already verified' });
+		}
+
+		const VerificationToken = getVerificationTokenModel();
+		await VerificationToken.createToken(user.id);
+
+		res.json({ message: 'Verification email sent' });
+	} catch (err) {
+		console.error(err.message);
+		res.status(500).json({ error: 'Server Error' });
 	}
 };
 
 /**
  * Login user.
- * Verifies credentials → issues fresh tokens.
+ * Verifies credentials -> issues fresh tokens.
  */
 const login = async (req, res) => {
-	const schema = Joi.object({
-		email: Joi.string().email().required(),
-		password: Joi.string().required(),
-	});
-
-	const { error } = schema.validate(req.body);
-	if (error) {
-		return res.status(400).json({ msg: error.details[0].message });
-	}
-
 	const { email, password } = req.body;
 
 	try {
-		// Verify user credentials
 		const user = await authService.loginUser(email, password);
 
-		// Generate new access token
-		const accessToken = tokenService.generateAccessToken({ user: { id: user.id } });
+		// Check if email is verified
+		if (!user.isVerified) {
+			return res.status(401).json({
+				error: 'Email not verified',
+				message: 'Please verify your email before logging in',
+			});
+		}
 
-		// Generate and store refresh token
+		const accessToken = tokenService.generateAccessToken(user);
 		const refreshToken = await tokenService.generateRefreshToken(user);
 		setTokenCookie(res, refreshToken.token);
 
 		res.json({
 			accessToken,
-			refreshToken: refreshToken.token,
 			user: {
 				id: user.id,
 				email: user.email,
+				roles: user.roles,
 			},
 		});
 	} catch (err) {
 		console.error(err.message);
-
 		if (err.message === 'Invalid Credentials') {
-			return res.status(400).json({ msg: err.message });
+			return res.status(400).json({ error: err.message });
 		}
-
-		res.status(500).send('Server Error');
+		res.status(500).json({ error: 'Server Error' });
 	}
 };
 
@@ -109,39 +163,30 @@ const login = async (req, res) => {
  * Implements refresh token rotation for security.
  */
 const refreshToken = async (req, res) => {
-	// Accept refresh token either from cookie or request body
 	const token = req.cookies.refreshToken || req.body.refreshToken;
 
 	if (!token) {
-		return res.status(400).json({ msg: 'Token is required' });
+		return res.status(400).json({ error: 'Token is required' });
 	}
 
 	try {
-		// Fetch refresh token record from database
 		const refreshTokenDoc = await tokenService.getRefreshToken(token);
 		const { user } = refreshTokenDoc;
 
-		// Generate a new refresh token (rotation)
 		const newRefreshToken = await tokenService.generateRefreshToken(user);
-
-		// Mark old token as revoked and link replacement
-		refreshTokenDoc.revoked = Date.now();
+		refreshTokenDoc.revoked = new Date();
 		refreshTokenDoc.replacedByToken = newRefreshToken.token;
 		await refreshTokenDoc.save();
 
-		// Issue new access token
-		const accessToken = tokenService.generateAccessToken({ user: { id: user.id } });
-
-		// Update cookie with new refresh token
+		const accessToken = tokenService.generateAccessToken(user);
 		setTokenCookie(res, newRefreshToken.token);
 
 		res.json({
 			accessToken,
-			refreshToken: newRefreshToken.token,
 		});
 	} catch (err) {
 		console.error(err.message);
-		res.status(400).json({ msg: 'Invalid Refresh Token' });
+		res.status(400).json({ error: 'Invalid Refresh Token' });
 	}
 };
 
@@ -153,13 +198,11 @@ const revokeToken = async (req, res) => {
 	const token = req.cookies.refreshToken || req.body.refreshToken;
 
 	if (!token) {
-		return res.status(400).json({ msg: 'Token is required' });
+		return res.status(400).json({ error: 'Token is required' });
 	}
 
-	// Remove or mark token as revoked in database
 	await tokenService.revokeToken(token);
-
-	res.status(200).json({ msg: 'Token revoked' });
+	res.status(200).json({ message: 'Token revoked' });
 };
 
 /**
@@ -172,7 +215,7 @@ const getMe = async (req, res) => {
 		res.json(user);
 	} catch (err) {
 		console.error(err.message);
-		res.status(500).send('Server Error');
+		res.status(500).json({ error: 'Server Error' });
 	}
 };
 
@@ -181,10 +224,12 @@ const getMe = async (req, res) => {
  * HttpOnly prevents frontend JS from reading the token.
  */
 function setTokenCookie(res, token) {
+	const isProduction = process.env.NODE_ENV === 'production';
 	const cookieOptions = {
 		httpOnly: true,
-		expires: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
-		// secure: true → enable in production with HTTPS
+		expires: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+		secure: isProduction,
+		sameSite: isProduction ? 'strict' : 'lax',
 	};
 
 	res.cookie('refreshToken', token, cookieOptions);
@@ -193,6 +238,8 @@ function setTokenCookie(res, token) {
 module.exports = {
 	register,
 	login,
+	verifyEmail,
+	resendVerification,
 	refreshToken,
 	revokeToken,
 	getMe,

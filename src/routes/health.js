@@ -1,12 +1,27 @@
 const express = require('express');
 const router = express.Router();
-const { mongoose } = require('../db'); // uses the mongoose instance from db module
+const { getSequelize } = require('../db');
 
 router.get('/', (req, res) => {
-	// mongoose.connection.readyState:
-	// 0 = disconnected, 1 = connected, 2 = connecting, 3 = disconnecting
-	const dbState = mongoose.connection.readyState;
-	const dbStatus = dbState === 1 ? 'up' : dbState === 2 ? 'connecting' : 'down';
+	const sequelize = getSequelize();
+
+	// Check database connection state
+	let dbState = 0; // disconnected by default
+	let dbStatus = 'down';
+
+	if (sequelize) {
+		try {
+			// Sequelize doesn't have a readyState like mongoose
+			// We check if the connection is authenticated
+			if (sequelize.connection && sequelize.connection.authenticated) {
+				dbState = 1;
+				dbStatus = 'up';
+			}
+		} catch (e) {
+			dbState = 0;
+			dbStatus = 'down';
+		}
+	}
 
 	res.json({
 		status: 'ok',

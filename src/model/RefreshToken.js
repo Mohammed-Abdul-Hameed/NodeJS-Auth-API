@@ -1,8 +1,9 @@
-const { mongoose } = require('../db');
+const { DataTypes } = require('sequelize');
+const { getSequelize } = require('../db');
 
 /**
- * Refresh Token Schema
- * --------------------
+ * Refresh Token Model
+ * -------------------
  * Stores refresh tokens in the database so they can be:
  * - Revoked on logout
  * - Rotated on refresh
@@ -10,59 +11,60 @@ const { mongoose } = require('../db');
  *
  * This prevents stolen refresh tokens from being reused forever.
  */
-const RefreshTokenSchema = new mongoose.Schema({
-	// Reference to the user this token belongs to
-	user: {
-		type: mongoose.Schema.Types.ObjectId,
-		ref: 'User',
-		required: true,
-	},
+function RefreshToken(sequelize) {
+	if (!sequelize) {
+		sequelize = getSequelize();
+	}
 
-	// Actual refresh token string issued to the client
-	token: {
-		type: String,
-		required: true,
-	},
+	const RefreshToken = sequelize.define('RefreshToken', {
+		id: {
+			type: DataTypes.UUID,
+			defaultValue: DataTypes.UUIDV4,
+			primaryKey: true,
+		},
+		userId: {
+			type: DataTypes.UUID,
+			allowNull: false,
+			field: 'user_id',
+			references: {
+				model: 'users',
+				key: 'id',
+			},
+		},
+		token: {
+			type: DataTypes.STRING,
+			allowNull: false,
+		},
+		expires: {
+			type: DataTypes.DATE,
+			allowNull: false,
+		},
+		revoked: {
+			type: DataTypes.DATE,
+			allowNull: true,
+		},
+		replacedByToken: {
+			type: DataTypes.STRING,
+			allowNull: true,
+			field: 'replaced_by_token',
+		},
+	}, {
+		tableName: 'refresh_tokens',
+		timestamps: true,
+		createdAt: 'created',
+		updatedAt: false,
+	});
 
-	// When this token should expire automatically
-	expires: {
-		type: Date,
-		required: true,
-	},
+	// Instance methods for checking token status
+	RefreshToken.prototype.isExpired = function () {
+		return new Date() >= this.expires;
+	};
 
-	// Timestamp when token was created
-	created: {
-		type: Date,
-		default: Date.now,
-	},
+	RefreshToken.prototype.isActive = function () {
+		return !this.revoked && !this.isExpired();
+	};
 
-	// If set, token has been revoked (logout or token rotation)
-	revoked: {
-		type: Date,
-	},
+	return RefreshToken;
+}
 
-	// Stores the new token that replaced this one during rotation
-	replacedByToken: {
-		type: String,
-	},
-});
-
-/**
- * Virtual property: checks if token is expired
- * (compares current time with expiry date)
- */
-RefreshTokenSchema.virtual('isExpired').get(function () {
-	return Date.now() >= this.expires;
-});
-
-/**
- * Virtual property: checks if token is currently valid
- * Active = not revoked AND not expired
- */
-RefreshTokenSchema.virtual('isActive').get(function () {
-	return !this.revoked && !this.isExpired;
-});
-
-// Export RefreshToken model
-module.exports = mongoose.model('RefreshToken', RefreshTokenSchema);
-
+module.exports = RefreshToken;

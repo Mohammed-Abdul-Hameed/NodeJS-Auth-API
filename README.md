@@ -160,3 +160,54 @@ Authorization: Bearer <access token>
 ## Purpose Of This Project
 
 To build authentication the way backend systems do it in production: token separation, rotation, revocation, and clean architecture.
+
+---
+
+## Docker (Local Dev)
+
+Build and run the API with MongoDB using Docker Compose:
+
+```bash
+docker compose up --build
+```
+
+The API will be available at:
+
+```bash
+http://localhost:3000
+```
+
+### Docker Environment
+
+Copy and edit the example environment file:
+
+```bash
+cp .env.example .env
+```
+
+---
+
+## Production VM (Docker)
+
+High-level steps for deploying on a VM:
+
+```bash
+# on your server
+# 1) clone repo
+# 2) create .env (use production secrets)
+# 3) build and run
+
+docker build -t auth-api .
+
+docker run -d \
+  --name auth-api \
+  --env-file .env \
+  -p 3000:3000 \
+  auth-api
+```
+
+If you prefer Docker Compose in production:
+
+```bash
+docker compose up --build -d
+```

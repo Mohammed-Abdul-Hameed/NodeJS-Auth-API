@@ -1,9 +1,11 @@
 const express = require('express');
 const helmet = require('helmet');
+const cors = require('cors');
 const cookieParser = require('cookie-parser');
 
 const healthRouter = require('./routes/health');
 const errorHandler = require('./middleware/errorHandler');
+const { apiLimiter } = require('./middleware/rateLimiter');
 
 const app = express();
 
@@ -16,6 +18,13 @@ const app = express();
 
 // Adds common security headers to protect against basic web attacks
 app.use(helmet());
+
+// CORS configuration - restrict in production
+app.use(cors({
+	origin: process.env.CORS_ORIGIN || 'http://localhost:3001',
+	credentials: true,
+	secure: process.env.NODE_ENV === 'production', // Only enable in production with HTTPS
+}));
 
 // Parses incoming JSON request bodies
 app.use(express.json());
@@ -33,8 +42,13 @@ app.use(cookieParser());
  */
 
 app.use('/health', healthRouter); // Simple health check endpoint
-app.use('/api/auth', require('./routes/auth')); // Authentication routes
-app.use('/api/user', require('./routes/user')); // User-related routes
+app.use('/api/v1/auth', apiLimiter, require('./routes/auth')); // Authentication routes v1
+app.use('/api/v1/user', apiLimiter, require('./routes/user')); // User-related routes v1
+
+// Welcome Route
+app.use('/', (req, res) => {
+	res.json({ message: 'Welcome to the API!' });
+});
 
 /**
  * Fallback for unknown routes.

@@ -1,6 +1,7 @@
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
-const RefreshToken = require('../model/RefreshToken');
+const { getSequelize } = require('../db');
+const RefreshTokenModel = require('../model/RefreshToken');
 
 /**
  * Token Service
@@ -10,14 +11,30 @@ const RefreshToken = require('../model/RefreshToken');
  * Refresh tokens = long-lived random strings stored in database.
  */
 
+// Lazy load model to ensure sequelize is initialized
+const getRefreshTokenModel = () => {
+	const sequelize = getSequelize();
+	return RefreshTokenModel(sequelize);
+};
+
 /**
  * Generates a short-lived JWT access token.
  * This token is sent with every protected request.
  */
-const generateAccessToken = (payload) => {
-	return jwt.sign(payload, process.env.JWT_SECRET, {
-		expiresIn: '15m', // short lifetime limits damage if stolen
-	});
+const generateAccessToken = (user) => {
+	// Include user id and roles in the token
+	return jwt.sign(
+		{
+			user: {
+				id: user.id,
+				roles: user.roles || ['user'],
+			},
+		},
+		process.env.JWT_SECRET,
+		{
+			expiresIn: '15m', // short lifetime limits damage if stolen
+		}
+	);
 };
 
 /**
@@ -25,6 +42,8 @@ const generateAccessToken = (payload) => {
  * Random bytes are used instead of JWTs so tokens can't be decoded or forged.
  */
 const generateRefreshToken = async (user) => {
+	const RefreshToken = getRefreshTokenModel();
+
 	// Create cryptographically strong random token
 	const token = crypto.randomBytes(40).toString('hex');
 
@@ -32,13 +51,12 @@ const generateRefreshToken = async (user) => {
 	const expires = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
 
 	// Store refresh token in DB linked to user
-	const refreshToken = new RefreshToken({
-		user: user.id,
+	const refreshToken = await RefreshToken.create({
+		userId: user.id,
 		token,
 		expires,
 	});
 
-	await refreshToken.save();
 	return refreshToken;
 };
 
@@ -55,10 +73,15 @@ const verifyAccessToken = (token) => {
  * Rejects expired or revoked tokens.
  */
 const getRefreshToken = async (token) => {
-	const refreshToken = await RefreshToken.findOne({ token }).populate('user');
+	const RefreshToken = getRefreshTokenModel();
+
+	const refreshToken = await RefreshToken.findOne({
+		where: { token },
+		include: ['user'],
+	});
 
 	// Virtual fields: isExpired and isActive come from model
-	if (!refreshToken || !refreshToken.isActive) {
+	if (!refreshToken || !refreshToken.isActive()) {
 		throw new Error('Invalid refresh token');
 	}
 
@@ -70,10 +93,12 @@ const getRefreshToken = async (token) => {
  * Called during logout or token reuse detection.
  */
 const revokeToken = async (token) => {
-	const refreshToken = await RefreshToken.findOne({ token });
+	const RefreshToken = getRefreshTokenModel();
+
+	const refreshToken = await RefreshToken.findOne({ where: { token } });
 
 	if (refreshToken) {
-		refreshToken.revoked = Date.now();
+		refreshToken.revoked = new Date();
 		await refreshToken.save();
 	}
 };

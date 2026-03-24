@@ -1,99 +1,76 @@
-const { mongoose } = require('../db');
+const { DataTypes } = require('sequelize');
 const bcrypt = require('bcrypt');
+const { getSequelize } = require('../db');
 
 /**
- * User Schema
- * -----------
+ * User Model
+ * ----------
  * Represents application users.
- * Handles authentication-related fields and security metadata.
+ * Uses Sequelize ORM for PostgreSQL.
  */
-const UserSchema = new mongoose.Schema(
-	{
-		// User email - unique identifier for login
-		email: {
-			type: String,
-			required: true,
-			unique: true,
-			lowercase: true,
-			trim: true,
-		},
-
-		// Hashed password (never returned in queries by default)
-		password: {
-			type: String,
-			required: true,
-			select: false,
-		},
-
-		// User roles for authorization (RBAC-ready)
-		roles: {
-			type: [String],
-			default: ['user'],
-		},
-
-		// Flag for email verification status
-		isVerified: {
-			type: Boolean,
-			default: false,
-		},
-
-		// Counts consecutive failed login attempts
-		// Useful for brute-force protection
-		failedLoginAttempts: {
-			type: Number,
-			default: 0,
-		},
-
-		// If set, user account is locked until this time
-		lockUntil: {
-			type: Date,
-			default: null,
-		},
-
-		// Timestamp of last password change
-		// Useful for invalidating old tokens
-		passwordChangedAt: {
-			type: Date,
-			default: null,
-		},
-	},
-	{
-		// Automatically adds createdAt and updatedAt fields
-		timestamps: true,
-	},
-);
-
-// Index is already ensured by `unique: true`
-// UserSchema.index({ email: 1 }, { unique: true });
-
-const SALT_ROUNDS = 10;
-// 10 rounds = reasonable dev default.
-
-/**
- * Pre-save hook
- * -------------
- * Automatically hashes password before storing.
- * Runs only when password field is newly set or modified.
- */
-UserSchema.pre('save', async function (next) {
-	// Skip hashing if password hasn't changed
-	if (!this.isModified('password')) return next();
-
-	try {
-		// Hash plain-text password
-		const hash = await bcrypt.hash(this.password, SALT_ROUNDS);
-
-		// Replace plain password with hashed version
-		this.password = hash;
-
-		// Record when password was last changed
-		this.passwordChangedAt = new Date();
-
-		next();
-	} catch (err) {
-		next(err);
+function User(sequelize) {
+	if (!sequelize) {
+		sequelize = getSequelize();
 	}
-});
 
-// Export User model
-module.exports = mongoose.model('User', UserSchema);
+	const User = sequelize.define('User', {
+		id: {
+			type: DataTypes.UUID,
+			defaultValue: DataTypes.UUIDV4,
+			primaryKey: true,
+		},
+		email: {
+			type: DataTypes.STRING,
+			allowNull: false,
+			unique: true,
+			validate: {
+				isEmail: true,
+			},
+		},
+		password: {
+			type: DataTypes.STRING,
+			allowNull: false,
+		},
+		roles: {
+			type: DataTypes.ARRAY(DataTypes.STRING),
+			defaultValue: ['user'],
+		},
+		isVerified: {
+			type: DataTypes.BOOLEAN,
+			defaultValue: false,
+		},
+		failedLoginAttempts: {
+			type: DataTypes.INTEGER,
+			defaultValue: 0,
+		},
+		lockUntil: {
+			type: DataTypes.DATE,
+			allowNull: true,
+		},
+		passwordChangedAt: {
+			type: DataTypes.DATE,
+			allowNull: true,
+		},
+	}, {
+		tableName: 'users',
+		timestamps: true,
+		hooks: {
+			beforeSave: async (user) => {
+				if (user.changed('password')) {
+					const salt = await bcrypt.genSalt(10);
+					user.password = await bcrypt.hash(user.password, salt);
+					user.passwordChangedAt = new Date();
+				}
+			},
+		},
+	});
+
+	// Instance method to compare passwords
+	User.prototype.comparePassword = async function (candidatePassword) {
+		return bcrypt.compare(candidatePassword, this.password);
+	};
+
+	return User;
+}
+
+module.exports = User;
